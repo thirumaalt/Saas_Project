@@ -1,4 +1,4 @@
-name: Deploy FastAPI via Secrets Manager
+name: Deploy FastAPI to App Runner
 
 on:
   push:
@@ -10,48 +10,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Configure bootstrap AWS credentials
+    - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v2
       with:
-        aws-access-key-id: ${{ secrets.BOOTSTRAP_AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_REGION }}
-
-    - name: Fetch real AWS credentials from Secrets Manager
-      id: creds
-      run: |
-        secret=$(aws secretsmanager get-secret-value --secret-id ci/aws-creds --query SecretString --output text)
-        echo "AWS_ACCESS_KEY_ID=$(echo $secret | jq -r .AWS_ACCESS_KEY_ID)" >> $GITHUB_ENV
-        echo "AWS_SECRET_ACCESS_KEY=$(echo $secret | jq -r .AWS_SECRET_ACCESS_KEY)" >> $GITHUB_ENV
-        echo "AWS_REGION=$(echo $secret | jq -r .AWS_REGION)" >> $GITHUB_ENV
-
-    - name: Configure real AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
 
     - name: Log in to Amazon ECR
       run: |
-        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
+        aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+        | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
-    - name: Build and push Docker image
+    - name: Build and Push Docker image to ECR
       run: |
-        IMAGE_URI=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+        IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
         docker build -t $IMAGE_URI .
         docker push $IMAGE_URI
 
     - name: Deploy to App Runner
       run: |
         aws apprunner update-service \
-          --service-arn ${{ env.APP_RUNNER_SERVICE_ARN }} \
+          --service-arn ${{ secrets.APP_RUNNER_SERVICE_ARN }} \
           --source-configuration '{
             "ImageRepository": {
-              "ImageIdentifier": "'"$IMAGE_URI"'",
+              "ImageIdentifier": "'"${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest"'",
               "ImageRepositoryType": "ECR",
               "ImageConfiguration": {
                 "Port": "8000"
